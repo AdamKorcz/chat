@@ -1,4 +1,4 @@
-package main
+package session
 
 import (
 	"net/http"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/server/auth/mock_auth"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/mock_store"
@@ -48,7 +49,7 @@ func TestDispatchHello(t *testing.T) {
 	if len(r.messages) != 1 {
 		t.Errorf("responses: expected 1, received %d.", len(r.messages))
 	}
-	resp := r.messages[0].(*ServerComMessage)
+	resp := r.messages[0].(*datamodel.ServerComMessage)
 	if resp == nil {
 		t.Fatal("Response must be ServerComMessage")
 	}
@@ -82,7 +83,7 @@ func verifyResponseCodes(r *responses, codes []int, t *testing.T) {
 		t.Errorf("responses: expected %d, received %d.", len(codes), len(r.messages))
 	}
 	for i := 0; i < len(codes); i++ {
-		resp := r.messages[i].(*ServerComMessage)
+		resp := r.messages[i].(*datamodel.ServerComMessage)
 		if resp == nil {
 			t.Fatalf("Response %d must be ServerComMessage", i)
 		}
@@ -193,7 +194,7 @@ func TestDispatchLogin(t *testing.T) {
 	if len(r.messages) != 1 {
 		t.Errorf("responses: expected 1, received %d.", len(r.messages))
 	}
-	resp := r.messages[0].(*ServerComMessage)
+	resp := r.messages[0].(*datamodel.ServerComMessage)
 	if resp == nil {
 		t.Fatal("Response must be ServerComMessage")
 	}
@@ -228,7 +229,7 @@ func TestDispatchSubscribe(t *testing.T) {
 	go s.testWriteLoop(&r, &wg)
 
 	hub := &Hub{
-		join: make(chan *ClientComMessage, 10),
+		join: make(chan *datamodel.ClientComMessage, 10),
 	}
 	globals.hub = hub
 
@@ -236,7 +237,7 @@ func TestDispatchSubscribe(t *testing.T) {
 		globals.hub = nil
 	}()
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Sub: &MsgClientSub{
 			Id:    "123",
 			Topic: "me",
@@ -276,7 +277,7 @@ func TestDispatchAlreadySubscribed(t *testing.T) {
 	wg.Add(1)
 	go s.testWriteLoop(&r, &wg)
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Sub: &MsgClientSub{
 			Id:    "123",
 			Topic: "me",
@@ -306,7 +307,7 @@ func TestDispatchSubscribeJoinChannelFull(t *testing.T) {
 
 	hub := &Hub{
 		// Make it unbuffered with no readers - so emit operation fails immediately.
-		join: make(chan *ClientComMessage),
+		join: make(chan *datamodel.ClientComMessage),
 	}
 	globals.hub = hub
 
@@ -314,7 +315,7 @@ func TestDispatchSubscribeJoinChannelFull(t *testing.T) {
 		globals.hub = nil
 	}()
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Sub: &MsgClientSub{
 			Id:    "123",
 			Topic: "me",
@@ -341,13 +342,13 @@ func TestDispatchLeave(t *testing.T) {
 
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
-	leave := make(chan *ClientComMessage, 1)
+	leave := make(chan *datamodel.ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		done: leave,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Leave: &MsgClientLeave{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -392,7 +393,7 @@ func TestDispatchLeaveUnsubMe(t *testing.T) {
 	s.subs = make(map[string]*Subscription)
 	s.subs[uid.UserId()] = &Subscription{}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Leave: &MsgClientLeave{
 			Id: "123",
 			// Cannot unsubscribe from 'me'.
@@ -420,7 +421,7 @@ func TestDispatchLeaveUnknownTopic(t *testing.T) {
 	// And wants to leave it => no change.
 	s.subs = make(map[string]*Subscription)
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Leave: &MsgClientLeave{
 			Id:    "123",
 			Topic: "me",
@@ -446,7 +447,7 @@ func TestDispatchLeaveUnsubFromUnknownTopic(t *testing.T) {
 	// And wants to leave & unsubscribe from it.
 	s.subs = make(map[string]*Subscription)
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Leave: &MsgClientLeave{
 			Id:    "123",
 			Topic: "me",
@@ -472,14 +473,14 @@ func TestDispatchPublish(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	brdcst := make(chan *ClientComMessage, 1)
+	brdcst := make(chan *datamodel.ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
 	}
 
 	testMessage := "test content"
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Pub: &MsgClientPub{
 			Id:      "123",
 			Topic:   destUid.UserId(),
@@ -524,14 +525,14 @@ func TestDispatchPublishBroadcastChannelFull(t *testing.T) {
 
 	// Make broadcast channel unbuffered with no reader -
 	// emit op will fail.
-	brdcst := make(chan *ClientComMessage)
+	brdcst := make(chan *datamodel.ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
 	}
 
 	testMessage := "test content"
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Pub: &MsgClientPub{
 			Id:      "123",
 			Topic:   destUid.UserId(),
@@ -560,7 +561,7 @@ func TestDispatchPublishMissingSubcription(t *testing.T) {
 	s.subs = make(map[string]*Subscription)
 
 	testMessage := "test content"
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Pub: &MsgClientPub{
 			Id:      "123",
 			Topic:   destUid.UserId(),
@@ -586,13 +587,13 @@ func TestDispatchGet(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	meta := make(chan *ClientComMessage, 1)
+	meta := make(chan *datamodel.ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Get: &MsgClientGet{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -629,7 +630,7 @@ func TestDispatchGetMalformedWhat(t *testing.T) {
 	go s.testWriteLoop(&r, &wg)
 
 	destUid := types.Uid(2)
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Get: &MsgClientGet{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -659,13 +660,13 @@ func TestDispatchGetMetaChannelFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered chan with no readers - emit will fail.
-	meta := make(chan *ClientComMessage)
+	meta := make(chan *datamodel.ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Get: &MsgClientGet{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -693,13 +694,13 @@ func TestDispatchSet(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	meta := make(chan *ClientComMessage, 1)
+	meta := make(chan *datamodel.ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Set: &MsgClientSet{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -743,7 +744,7 @@ func TestDispatchSetMalformedWhat(t *testing.T) {
 	go s.testWriteLoop(&r, &wg)
 
 	destUid := types.Uid(2)
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Set: &MsgClientSet{
 			Id:          "123",
 			Topic:       destUid.UserId(),
@@ -772,13 +773,13 @@ func TestDispatchSetMetaChannelFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered meta channel w/ no readers - emit will fail.
-	meta := make(chan *ClientComMessage)
+	meta := make(chan *datamodel.ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Set: &MsgClientSet{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -810,13 +811,13 @@ func TestDispatchDelMsg(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	meta := make(chan *ClientComMessage, 1)
+	meta := make(chan *datamodel.ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Del: &MsgClientDel{
 			Id:     "123",
 			Topic:  destUid.UserId(),
@@ -853,7 +854,7 @@ func TestDispatchDelMalformedWhat(t *testing.T) {
 	go s.testWriteLoop(&r, &wg)
 
 	destUid := types.Uid(2)
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Del: &MsgClientDel{
 			Id:    "123",
 			Topic: destUid.UserId(),
@@ -881,13 +882,13 @@ func TestDispatchDelMetaChanFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered chan - to simulate a full buffered chan.
-	meta := make(chan *ClientComMessage)
+	meta := make(chan *datamodel.ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Del: &MsgClientDel{
 			Id:     "123",
 			Topic:  destUid.UserId(),
@@ -915,7 +916,7 @@ func TestDispatchDelUnsubscribedSession(t *testing.T) {
 	destUid := types.Uid(2)
 	// Session isn't subscribed.
 	s.subs = make(map[string]*Subscription)
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Del: &MsgClientDel{
 			Id:     "123",
 			Topic:  destUid.UserId(),
@@ -943,13 +944,13 @@ func TestDispatchNote(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	brdcst := make(chan *ClientComMessage, 1)
+	brdcst := make(chan *datamodel.ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Note: &MsgClientNote{
 			Topic: destUid.UserId(),
 			What:  "recv",
@@ -996,13 +997,13 @@ func TestDispatchNoteBroadcastChanFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered chan - to simulate a full buffered chan.
-	brdcst := make(chan *ClientComMessage)
+	brdcst := make(chan *datamodel.ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
 	}
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Note: &MsgClientNote{
 			Topic: destUid.UserId(),
 			What:  "recv",
@@ -1028,7 +1029,7 @@ func TestDispatchNoteOnNonSubscribedTopic(t *testing.T) {
 	destUid := types.Uid(2)
 	s.subs = make(map[string]*Subscription)
 
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Note: &MsgClientNote{
 			Topic: destUid.UserId(),
 			What:  "read",
@@ -1095,7 +1096,7 @@ func TestDispatchAccNew(t *testing.T) {
 	go s.testWriteLoop(&r, &wg)
 
 	public := "public name"
-	msg := &ClientComMessage{
+	msg := &datamodel.ClientComMessage{
 		Acc: &MsgClientAcc{
 			Id:     "123",
 			User:   "newXYZ",
@@ -1113,7 +1114,7 @@ func TestDispatchAccNew(t *testing.T) {
 	if len(r.messages) != 1 {
 		t.Errorf("responses: expected 1, received %d.", len(r.messages))
 	}
-	resp := r.messages[0].(*ServerComMessage)
+	resp := r.messages[0].(*datamodel.ServerComMessage)
 	if resp == nil {
 		t.Fatal("Response must be ServerComMessage")
 	}
@@ -1155,7 +1156,7 @@ func TestDispatchNoMessage(t *testing.T) {
 	wg.Add(1)
 	go s.testWriteLoop(&r, &wg)
 
-	msg := &ClientComMessage{}
+	msg := &datamodel.ClientComMessage{}
 
 	s.dispatch(msg)
 	close(s.send)
@@ -1164,7 +1165,7 @@ func TestDispatchNoMessage(t *testing.T) {
 	if len(r.messages) != 1 {
 		t.Errorf("responses: expected 1, received %d.", len(r.messages))
 	}
-	resp := r.messages[0].(*ServerComMessage)
+	resp := r.messages[0].(*datamodel.ServerComMessage)
 	if resp == nil {
 		t.Fatal("Response must be ServerComMessage")
 	}

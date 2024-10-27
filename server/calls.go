@@ -4,7 +4,7 @@
  *    Video call handling (establishment, metadata exhange and termination).
  *
  *****************************************************************************/
-package main
+package server
 
 import (
 	"encoding/json"
@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tinode/chat/server/globals"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store/types"
 	jcr "github.com/tinode/jsonco"
@@ -53,13 +54,13 @@ type callConfig struct {
 	// Timeout in seconds before a call is dropped if not answered.
 	CallEstablishmentTimeout int `json:"call_establishment_timeout"`
 	// ICE servers.
-	ICEServers []iceServer `json:"ice_servers"`
+	ICEServers []IceServer `json:"ice_servers"`
 	// Alternative config as an external file.
 	ICEServersFile string `json:"ice_servers_file"`
 }
 
 // ICE server config.
-type iceServer struct {
+type IceServer struct {
 	Username       string   `json:"username,omitempty"`
 	Credential     string   `json:"credential,omitempty"`
 	CredentialType string   `json:"credential_type,omitempty"`
@@ -130,9 +131,9 @@ func initVideoCalls(jsconfig json.RawMessage) error {
 	}
 
 	if len(config.ICEServers) > 0 {
-		globals.iceServers = config.ICEServers
+		globals.Globals.iceServers = config.ICEServers
 	} else if config.ICEServersFile != "" {
-		var iceConfig []iceServer
+		var iceConfig []IceServer
 		file, err := os.Open(config.ICEServersFile)
 		if err != nil {
 			return fmt.Errorf("failed to read ICE config: %w", err)
@@ -155,19 +156,19 @@ func initVideoCalls(jsconfig json.RawMessage) error {
 		}
 		file.Close()
 
-		globals.iceServers = iceConfig
+		globals.Globals.iceServers = iceConfig
 	}
 
-	if len(globals.iceServers) == 0 {
+	if len(globals.Globals.iceServers) == 0 {
 		return errors.New("no valid ICE cervers found")
 	}
 
-	globals.callEstablishmentTimeout = config.CallEstablishmentTimeout
-	if globals.callEstablishmentTimeout <= 0 {
-		globals.callEstablishmentTimeout = defaultCallEstablishmentTimeout
+	globals.Globals.callEstablishmentTimeout = config.CallEstablishmentTimeout
+	if globals.Globals.callEstablishmentTimeout <= 0 {
+		globals.Globals.callEstablishmentTimeout = defaultCallEstablishmentTimeout
 	}
 
-	logs.Info.Println("Video calls enabled with", len(globals.iceServers), "ICE servers")
+	logs.Info.Println("Video calls enabled with", len(globals.Globals.iceServers), "ICE servers")
 	return nil
 }
 

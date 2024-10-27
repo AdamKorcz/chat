@@ -6,7 +6,7 @@
  *
  *****************************************************************************/
 
-package main
+package sessionstore
 
 import (
 	"container/list"
@@ -18,6 +18,7 @@ import (
 	"github.com/tinode/chat/pbx"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
+	"github.com/tinode/chat/server/session"
 	"github.com/tinode/chat/server/store/types"
 )
 
@@ -73,7 +74,7 @@ type SessionStore struct {
 }
 
 // NewSession creates a new session and saves it to the session store.
-func (ss *SessionStore) NewSession(conn any, sid string) (*Session, int) {
+func (ss *SessionStore) NewSession(conn any, sid string) (*sesion.Session, int) {
 	var s Session
 
 	if sid == "" {
@@ -160,7 +161,7 @@ func (ss *SessionStore) NewSession(conn any, sid string) (*Session, int) {
 }
 
 // Get fetches a session from store by session ID.
-func (ss *SessionStore) Get(sid string) *Session {
+func (ss *SessionStore) Get(sid string) *session.Session {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 
@@ -177,7 +178,7 @@ func (ss *SessionStore) Get(sid string) *Session {
 }
 
 // Delete removes session from store.
-func (ss *SessionStore) Delete(s *Session) {
+func (ss *SessionStore) Delete(s *session.Session) {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 
@@ -190,7 +191,7 @@ func (ss *SessionStore) Delete(s *Session) {
 }
 
 // Range calls given function for all sessions. It stops if the function returns false.
-func (ss *SessionStore) Range(f func(sid string, s *Session) bool) {
+func (ss *SessionStore) Range(f func(sid string, s *session.Session) bool) {
 	ss.lock.Lock()
 	for sid, s := range ss.sessCache {
 		if !f(sid, s) {
@@ -267,7 +268,7 @@ func NewSessionStore(lifetime time.Duration) *SessionStore {
 		lru:      list.New(),
 		lifeTime: lifetime,
 
-		sessCache: make(map[string]*Session),
+		sessCache: make(map[string]*session.Session),
 	}
 
 	statsRegisterInt("LiveSessions")

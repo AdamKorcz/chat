@@ -1,4 +1,4 @@
-package main
+package user
 
 import (
 	"container/heap"
@@ -8,6 +8,7 @@ import (
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
+	"github.com/tinode/chat/server/session"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -21,7 +22,7 @@ const (
 )
 
 // Process request for a new account.
-func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
+func replyCreateUser(s *session.Session, msg *ClientComMessage, rec *auth.Rec) {
 	// The session cannot authenticate with the new account because  it's already authenticated.
 	if msg.Acc.Login && (!s.uid.IsZero() || rec != nil) {
 		s.queueOut(ErrAlreadyAuthenticated(msg.Id, "", msg.Timestamp))
@@ -219,7 +220,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 // Process update to an account:
 // * Authentication update, i.e. login/password change
 // * Credentials update
-func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
+func replyUpdateUser(s *session.Session, msg *ClientComMessage, rec *auth.Rec) {
 	if s.uid.IsZero() && rec == nil {
 		// Session is not authenticated and no temporary auth is provided.
 		logs.Warn.Println("replyUpdateUser: not a new account and not authenticated", s.sid)
@@ -555,7 +556,7 @@ func deleteCred(uid types.Uid, authLvl auth.Level, cred *MsgCredClient) ([]strin
 // 3. Suspend/activate p2p with the user.
 // 4. Suspend/activate grp topics where the user is the owner.
 // 5. Update user's DB record.
-func changeUserState(s *Session, uid types.Uid, user *types.User, msg *ClientComMessage) (bool, error) {
+func changeUserState(s *session.Session, uid types.Uid, user *types.User, msg *ClientComMessage) (bool, error) {
 	state, err := types.NewObjState(msg.Acc.State)
 	if err != nil || state == types.StateUndefined {
 		logs.Warn.Println("replyUpdateUser: invalid account state", s.sid)
@@ -592,7 +593,7 @@ func changeUserState(s *Session, uid types.Uid, user *types.User, msg *ClientCom
 // 5. Delete user from the database.
 // 6. Report success or failure.
 // 7. Terminate user's last session.
-func replyDelUser(s *Session, msg *ClientComMessage) {
+func replyDelUser(s *session.Session, msg *ClientComMessage) {
 	var uid types.Uid
 
 	if msg.Del.User == "" || msg.Del.User == s.uid.UserId() {
