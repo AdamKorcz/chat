@@ -56,6 +56,8 @@ type Session interface {
 	OnBackgroundTimer()
 }
 
+type Subscription interface {}
+
 // MsgGetOpts defines Get query parameters.
 type MsgGetOpts struct {
 	// Optional User ID to return result(s) for one user.

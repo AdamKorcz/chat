@@ -26,6 +26,7 @@ import (
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
+	"github.com/tinode/chat/server/utils"
 
 	"golang.org/x/text/language"
 )
@@ -37,7 +38,14 @@ const sendQueueLimit = 128
 // If session terminates (or unsubscribes from topic) in this time frame notifications are not sent at all.
 const deferredNotificationsTimeout = time.Second * 5
 
-var minSupportedVersionValue = parseVersion(minSupportedVersion)
+const (
+	// currentVersion is the current API/protocol version
+	currentVersion = "0.22"
+	// minSupportedVersion is the minimum supported API version
+	minSupportedVersion = "0.19"
+)
+
+var minSupportedVersionValue = utils.ParseVersion(minSupportedVersion)
 
 // SessionProto is the type of the wire transport.
 type SessionProto int
@@ -205,7 +213,7 @@ func (s *Session) GetSub(topic string) *Subscription {
 
 func (s *Session) DelSub(topic string) {
 	if s.multi != nil {
-		s.multi.delSub(topic)
+		s.multi.DelSub(topic)
 		return
 	}
 	s.subsLock.Lock()
@@ -270,7 +278,7 @@ func (s *Session) SupportsMessageBatching() bool {
 
 // queueOut attempts to send a list of ServerComMessages to a session write loop;
 // it fails if the send buffer is full.
-func (s *Session) QueueOutBatch(msgs []*ServerComMessage) bool {
+func (s *Session) QueueOutBatch(msgs []*datamodel.ServerComMessage) bool {
 	if s == nil {
 		return true
 	}
@@ -312,7 +320,7 @@ func (s *Session) QueueOutBatch(msgs []*ServerComMessage) bool {
 
 // queueOut attempts to send a ServerComMessage to a session write loop;
 // it fails, if the send buffer is full.
-func (s *Session) QueueOut(msg *ServerComMessage) bool {
+func (s *Session) QueueOut(msg *datamodel.ServerComMessage) bool {
 	if s == nil {
 		return true
 	}
@@ -468,7 +476,7 @@ func (s *Session) Dispatch(msg *datamodel.ClientComMessage) {
 	atomic.StoreInt64(&s.lastAction, now.UnixNano())
 
 	// This should be the first block here, before any other checks.
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	if msg, resp = pluginFireHose(s, msg); resp != nil {
 		// Plugin provided a response. No further processing is needed.
 		s.queueOut(resp)
@@ -621,7 +629,7 @@ func (s *Session) Subscribe(msg *datamodel.ClientComMessage) {
 		// If we are in a cluster, make sure the new topic belongs to the current node.
 		msg.RcptTo = globals.cluster.genLocalTopicName()
 	} else {
-		var resp *ServerComMessage
+		var resp *datamodel.ServerComMessage
 		msg.RcptTo, resp = s.expandTopicName(msg)
 		if resp != nil {
 			s.queueOut(resp)
@@ -650,7 +658,7 @@ func (s *Session) Subscribe(msg *datamodel.ClientComMessage) {
 // Leave/Unsubscribe a topic
 func (s *Session) Leave(msg *datamodel.ClientComMessage) {
 	// Expand topic name
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
 	if resp != nil {
 		s.queueOut(resp)
@@ -685,7 +693,7 @@ func (s *Session) Leave(msg *datamodel.ClientComMessage) {
 // Broadcast a message to all topic subscribers
 func (s *Session) Publish(msg *datamodel.ClientComMessage) {
 	// TODO(gene): Check for repeated messages with the same ID
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
 	if resp != nil {
 		s.queueOut(resp)
@@ -737,7 +745,7 @@ func (s *Session) Hello(msg *datamodel.ClientComMessage) {
 	var deviceIDUpdate bool
 
 	if s.ver == 0 {
-		s.ver = parseVersion(msg.Hi.Version)
+		s.ver = utils.ParseVersion(msg.Hi.Version)
 		if s.ver == 0 {
 			logs.Warn.Println("s.hello:", "failed to parse version", s.sid)
 			s.queueOut(ErrMalformed(msg.Id, "", msg.Timestamp))
@@ -792,7 +800,7 @@ func (s *Session) Hello(msg *datamodel.ClientComMessage) {
 		if msg.Hi.Background {
 			s.bkgTimer.Reset(deferredNotificationsTimeout)
 		}
-	} else if msg.Hi.Version == "" || parseVersion(msg.Hi.Version) == s.ver {
+	} else if msg.Hi.Version == "" || utils.ParseVersion(msg.Hi.Version) == s.ver {
 		// Save changed device ID+Lang or delete earlier specified device ID.
 		// Platform cannot be changed.
 		if !s.uid.IsZero() {
@@ -1040,8 +1048,8 @@ func (s *Session) AuthSecretReset(params []byte) error {
 }
 
 // onLogin performs steps after successful authentication.
-func (s *Session) OnLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *ServerComMessage {
-	var reply *ServerComMessage
+func (s *Session) OnLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *datamodel.ServerComMessage {
+	var reply *datamodel.ServerComMessage
 	var params map[string]any
 
 	features := rec.Features
@@ -1094,7 +1102,7 @@ func (s *Session) OnLogin(msgID string, timestamp time.Time, rec *auth.Rec, miss
 
 func (s *Session) Get(msg *datamodel.ClientComMessage) {
 	// Expand topic name.
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
 	if resp != nil {
 		s.queueOut(resp)
@@ -1132,7 +1140,7 @@ func (s *Session) Get(msg *datamodel.ClientComMessage) {
 
 func (s *Session) Set(msg *datamodel.ClientComMessage) {
 	// Expand topic name.
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
 	if resp != nil {
 		s.queueOut(resp)
@@ -1190,7 +1198,7 @@ func (s *Session) Del(msg *datamodel.ClientComMessage) {
 	// Delete something other than user: topic, subscription, message(s)
 
 	// Expand topic name and validate request.
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
 	if resp != nil {
 		s.queueOut(resp)
@@ -1243,7 +1251,7 @@ func (s *Session) Note(msg *datamodel.ClientComMessage) {
 	}
 
 	// Expand topic name and validate request.
-	var resp *ServerComMessage
+	var resp *datamodel.ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
 	if resp != nil {
 		// Silently ignoring the message
@@ -1310,8 +1318,8 @@ func (s *Session) Note(msg *datamodel.ClientComMessage) {
 //
 //	topic: session-specific topic name the message recipient should see
 //	routeTo: routable global topic name
-//	err: *ServerComMessage with an error to return to the sender
-func (s *Session) ExpandTopicName(msg *datamodel.ClientComMessage) (string, *ServerComMessage) {
+//	err: *datamodel.ServerComMessage with an error to return to the sender
+func (s *Session) ExpandTopicName(msg *datamodel.ClientComMessage) (string, *datamodel.ServerComMessage) {
 	if msg.Original == "" {
 		logs.Warn.Println("s.etn: empty topic name", s.sid)
 		return "", ErrMalformed(msg.Id, "", msg.Timestamp)
@@ -1346,7 +1354,7 @@ func (s *Session) ExpandTopicName(msg *datamodel.ClientComMessage) (string, *Ser
 	return routeTo, nil
 }
 
-func (s *Session) SerializeAndUpdateStats(msg *ServerComMessage) any {
+func (s *Session) SerializeAndUpdateStats(msg *datamodel.ServerComMessage) any {
 	dataSize, data := s.serialize(msg)
 	if dataSize >= 0 {
 		statsAddHistSample("OutgoingMessageSize", float64(dataSize))
@@ -1354,7 +1362,7 @@ func (s *Session) SerializeAndUpdateStats(msg *ServerComMessage) any {
 	return data
 }
 
-func (s *Session) Serialize(msg *ServerComMessage) (int, any) {
+func (s *Session) Serialize(msg *datamodel.ServerComMessage) (int, any) {
 	if s.proto == GRPC {
 		msg := pbServSerialize(msg)
 		// TODO: calculate and return the size of `msg`.

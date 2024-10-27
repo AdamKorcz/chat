@@ -1,6 +1,6 @@
 // Generic data manipulation utilities.
 
-package server
+package utils
 
 import (
 	"crypto/tls"
@@ -19,6 +19,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/datamodel"
+	"github.com/tinode/chat/server/globals"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -38,14 +40,14 @@ var tagRegexp = regexp.MustCompile(`^[-_+.!?#@\pL\pN]{1,96}$`)
 const nullValue = "\u2421"
 
 // Convert a list of IDs into ranges
-func delrangeDeserialize(in []types.Range) []MsgDelRange {
+func DelrangeDeserialize(in []types.Range) []datamodel.MsgDelRange {
 	if len(in) == 0 {
 		return nil
 	}
 
-	out := make([]MsgDelRange, 0, len(in))
+	out := make([]datamodel.MsgDelRange, 0, len(in))
 	for _, r := range in {
-		out = append(out, MsgDelRange{LowId: r.Low, HiId: r.Hi})
+		out = append(out, datamodel.MsgDelRange{LowId: r.Low, HiId: r.Hi})
 	}
 
 	return out
@@ -53,7 +55,7 @@ func delrangeDeserialize(in []types.Range) []MsgDelRange {
 
 // Trim whitespace, remove short/empty tags and duplicates, convert to lowercase, ensure
 // the number of tags does not exceed the maximum.
-func normalizeTags(src []string) types.StringSlice {
+func NormalizeTags(src []string) types.StringSlice {
 	if src == nil {
 		return nil
 	}
@@ -61,8 +63,8 @@ func normalizeTags(src []string) types.StringSlice {
 	// Make sure the number of tags does not exceed the maximum.
 	// Technically it may result in fewer tags than the maximum due to empty tags and
 	// duplicates, but that's user's fault.
-	if len(src) > globals.maxTagCount {
-		src = src[:globals.maxTagCount]
+	if len(src) > globals.Globals.maxTagCount {
+		src = src[:globals.Globals.maxTagCount]
 	}
 
 	// Trim whitespace and force to lowercase.
@@ -108,7 +110,7 @@ func normalizeTags(src []string) types.StringSlice {
 //	added :=  newSlice - (oldSlice & newSlice) -- present in new but missing in old
 //	removed := oldSlice - (oldSlice & newSlice) -- present in old but missing in new
 //	intersection := oldSlice & newSlice -- present in both old and new
-func stringSliceDelta(rold, rnew []string) (added, removed, intersection []string) {
+func StringSliceDelta(rold, rnew []string) (added, removed, intersection []string) {
 	if len(rold) == 0 && len(rnew) == 0 {
 		return nil, nil, nil
 	}
@@ -152,7 +154,7 @@ func stringSliceDelta(rold, rnew []string) (added, removed, intersection []strin
 
 // restrictedTagsEqual checks if two sets of tags contain the same set of restricted tags:
 // true - same, false - different.
-func restrictedTagsEqual(oldTags, newTags []string, namespaces map[string]bool) bool {
+func RestrictedTagsEqual(oldTags, newTags []string, namespaces map[string]bool) bool {
 	rold := filterRestrictedTags(oldTags, namespaces)
 	rnew := filterRestrictedTags(newTags, namespaces)
 
@@ -176,19 +178,19 @@ func restrictedTagsEqual(oldTags, newTags []string, namespaces map[string]bool) 
 // Process credentials for correctness: remove duplicate and unknown methods.
 // In case of duplicate methods only the first one satisfying valueRequired is kept.
 // If valueRequired is true, keep only those where Value is non-empty.
-func normalizeCredentials(creds []MsgCredClient, valueRequired bool) []MsgCredClient {
+func NormalizeCredentials(creds []datamodel.MsgCredClient, valueRequired bool) []datamodel.MsgCredClient {
 	if len(creds) == 0 {
 		return nil
 	}
 
-	index := make(map[string]*MsgCredClient)
+	index := make(map[string]*datamodel.MsgCredClient)
 	for i := range creds {
 		c := &creds[i]
-		if _, ok := globals.validators[c.Method]; ok && (!valueRequired || c.Value != "") {
+		if _, ok := globals.Globals.validators[c.Method]; ok && (!valueRequired || c.Value != "") {
 			index[c.Method] = c
 		}
 	}
-	creds = make([]MsgCredClient, 0, len(index))
+	creds = make([]datamodel.MsgCredClient, 0, len(index))
 	for _, c := range index {
 		creds = append(creds, *index[c.Method])
 	}
@@ -196,7 +198,7 @@ func normalizeCredentials(creds []MsgCredClient, valueRequired bool) []MsgCredCl
 }
 
 // Get a string slice with methods of credentials.
-func credentialMethods(creds []MsgCredClient) []string {
+func CredentialMethods(creds []datamodel.MsgCredClient) []string {
 	out := make([]string, len(creds))
 	for i := range creds {
 		out[i] = creds[i].Method
@@ -205,7 +207,7 @@ func credentialMethods(creds []MsgCredClient) []string {
 }
 
 // Takes MsgClientGet query parameters, returns database query parameters
-func msgOpts2storeOpts(req *MsgGetOpts) *types.QueryOpt {
+func MsgOpts2storeOpts(req *MsgGetOpts) *types.QueryOpt {
 	var opts *types.QueryOpt
 	if req != nil {
 		opts = &types.QueryOpt{
@@ -221,21 +223,21 @@ func msgOpts2storeOpts(req *MsgGetOpts) *types.QueryOpt {
 }
 
 // Check if the interface contains a string with a single Unicode Del control character.
-func isNullValue(i any) bool {
+func IsNullValue(i any) bool {
 	if str, ok := i.(string); ok {
 		return str == nullValue
 	}
 	return false
 }
 
-func decodeStoreError(err error, id string, ts time.Time, params map[string]any) *ServerComMessage {
+func DecodeStoreError(err error, id string, ts time.Time, params map[string]any) *datamodel.ServerComMessage {
 	return decodeStoreErrorExplicitTs(err, id, "", ts, ts, params)
 }
 
-func decodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingReqTs time.Time,
-	params map[string]any) *ServerComMessage {
+func DecodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingReqTs time.Time,
+	params map[string]any) *datamodel.ServerComMessage {
 
-	var errmsg *ServerComMessage
+	var errmsg *datamodel.ServerComMessage
 
 	if err == nil {
 		errmsg = NoErrExplicitTs(id, topic, serverTs, incomingReqTs)
@@ -284,7 +286,7 @@ func decodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingR
 }
 
 // Helper function to select access mode for the given auth level
-func selectAccessMode(authLvl auth.Level, anonMode, authMode, rootMode types.AccessMode) types.AccessMode {
+func SelectAccessMode(authLvl auth.Level, anonMode, authMode, rootMode types.AccessMode) types.AccessMode {
 	switch authLvl {
 	case auth.LevelNone:
 		return types.ModeNone
@@ -300,7 +302,7 @@ func selectAccessMode(authLvl auth.Level, anonMode, authMode, rootMode types.Acc
 }
 
 // Get default modeWant for the given topic category
-func getDefaultAccess(cat types.TopicCat, authUser, isChan bool) types.AccessMode {
+func GetDefaultAccess(cat types.TopicCat, authUser, isChan bool) types.AccessMode {
 	if !authUser {
 		return types.ModeNone
 	}
@@ -323,7 +325,7 @@ func getDefaultAccess(cat types.TopicCat, authUser, isChan bool) types.AccessMod
 }
 
 // Parse topic access parameters
-func parseTopicAccess(acs *MsgDefaultAcsMode, defAuth, defAnon types.AccessMode) (authMode, anonMode types.AccessMode,
+func ParseTopicAccess(acs *datamodel.MsgDefaultAcsMode, defAuth, defAnon types.AccessMode) (authMode, anonMode types.AccessMode,
 	err error) {
 
 	authMode, anonMode = defAuth, defAnon
@@ -339,7 +341,7 @@ func parseTopicAccess(acs *MsgDefaultAcsMode, defAuth, defAnon types.AccessMode)
 }
 
 // Parse one component of a semantic version string.
-func parseVersionPart(vers string) int {
+func ParseVersionPart(vers string) int {
 	end := strings.IndexFunc(vers, func(r rune) bool {
 		return !unicode.IsDigit(r)
 	})
@@ -362,7 +364,7 @@ func parseVersionPart(vers string) int {
 //	1.2, 1.2abc, 1.2.3, 1.2.3-abc, v0.12.34-rc5
 //
 // Unparceable values are replaced with zeros.
-func parseVersion(vers string) int {
+func ParseVersion(vers string) int {
 	var major, minor, patch int
 	// Maybe remove the optional "v" prefix.
 	vers = strings.TrimPrefix(vers, "v")
@@ -384,7 +386,7 @@ func parseVersion(vers string) int {
 }
 
 // Version as a base-10 number. Used by monitoring.
-func base10Version(hex int) int64 {
+func Base10Version(hex int) int64 {
 	major := hex >> 16 & 0xFF
 	minor := hex >> 8 & 0xFF
 	trailer := hex & 0xFF
@@ -403,7 +405,7 @@ func versionToString(vers int) string {
 
 // Take a slice of tags, return a slice of restricted namespace tags contained in the input.
 // Tags to filter, restricted namespaces to filter.
-func filterRestrictedTags(tags []string, namespaces map[string]bool) []string {
+func FilterRestrictedTags(tags []string, namespaces map[string]bool) []string {
 	var out []string
 	if len(namespaces) == 0 {
 		return out
@@ -428,7 +430,7 @@ func filterRestrictedTags(tags []string, namespaces map[string]bool) []string {
 // The tag is expected to be converted to lowercase.
 // On success, it prepends the token with the corresponding prefix. It returns an empty string if the tag is invalid.
 // TODO: consider inferring country code from user location.
-func rewriteTag(orig, countryCode string, withLogin bool) string {
+func RewriteTag(orig, countryCode string, withLogin bool) string {
 	// Check if the tag already has a prefix e.g. basic:alice.
 	if prefixedTagRegexp.MatchString(orig) {
 		return orig
@@ -436,7 +438,7 @@ func rewriteTag(orig, countryCode string, withLogin bool) string {
 
 	// Check if token can be rewritten by any of the validators
 	param := map[string]any{"countryCode": countryCode}
-	for name, conf := range globals.validators {
+	for name, conf := range globals.Globals.validators {
 		if conf.addToTags {
 			val := store.Store.GetValidator(name)
 			if tag, _ := val.PreCheck(orig, param); tag != "" {
@@ -471,7 +473,7 @@ func rewriteTag(orig, countryCode string, withLogin bool) string {
 // * required tags: AND of ORs of tags (at least one of each subset must be present in every result),
 // * optional tags
 // * error.
-func parseSearchQuery(query, countryCode string, withLogin bool) ([][]string, []string, error) {
+func ParseSearchQuery(query, countryCode string, withLogin bool) ([][]string, []string, error) {
 	const (
 		NONE = iota
 		QUO
@@ -642,7 +644,7 @@ func parseSearchQuery(query, countryCode string, withLogin bool) ([][]string, []
 
 // Returns > 0 if v1 > v2; zero if equal; < 0 if v1 < v2
 // Only Major and Minor parts are compared, the trailer is ignored.
-func versionCompare(v1, v2 int) int {
+func VersionCompare(v1, v2 int) int {
 	return (v1 >> 8) - (v2 >> 8)
 }
 
@@ -654,7 +656,7 @@ func max(a, b int) int {
 }
 
 // Truncate string if it's too long. Used in logging.
-func truncateStringIfTooLong(s string) string {
+func TruncateStringIfTooLong(s string) string {
 	if len(s) <= 1024 {
 		return s
 	}
@@ -663,7 +665,7 @@ func truncateStringIfTooLong(s string) string {
 }
 
 // Convert relative filepath to absolute.
-func toAbsolutePath(base, path string) string {
+func ToAbsolutePath(base, path string) string {
 	if filepath.IsAbs(path) {
 		return path
 	}
@@ -671,7 +673,7 @@ func toAbsolutePath(base, path string) string {
 }
 
 // Detect platform from the UserAgent string.
-func platformFromUA(ua string) string {
+func PlatformFromUA(ua string) string {
 	ua = strings.ToLower(ua)
 	switch {
 	case strings.Contains(ua, "reactnative"):
@@ -693,7 +695,7 @@ func platformFromUA(ua string) string {
 	return ""
 }
 
-func parseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, error) {
+func ParseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, error) {
 	type tlsAutocertConfig struct {
 		// Domains to support by autocert
 		Domains []string `json:"domains"`
@@ -730,10 +732,10 @@ func parseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, err
 	}
 
 	if config.StrictMaxAge > 0 {
-		globals.tlsStrictMaxAge = strconv.Itoa(config.StrictMaxAge)
+		globals.Globals.tlsStrictMaxAge = strconv.Itoa(config.StrictMaxAge)
 	}
 
-	globals.tlsRedirectHTTP = config.RedirectHTTP
+	globals.Globals.tlsRedirectHTTP = config.RedirectHTTP
 
 	// If autocert is provided, use it.
 	if config.Autocert != nil {
@@ -758,7 +760,7 @@ func parseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, err
 // Merge source interface{} into destination interface.
 // If values are maps,deep-merge them. Otherwise shallow-copy.
 // Returns dst, true if the dst value was changed.
-func mergeInterfaces(dst, src any) (any, bool) {
+func MergeInterfaces(dst, src any) (any, bool) {
 	var changed bool
 
 	if src == nil {
@@ -791,7 +793,7 @@ func mergeInterfaces(dst, src any) (any, bool) {
 }
 
 // Deep copy maps.
-func mergeMaps(dst, src map[string]any) (map[string]any, bool) {
+func MergeMaps(dst, src map[string]any) (map[string]any, bool) {
 	var changed bool
 
 	if len(src) == 0 {
@@ -837,7 +839,7 @@ func mergeMaps(dst, src map[string]any) (map[string]any, bool) {
 
 // netListener creates net.Listener for tcp and unix domains:
 // if addr is in the form "unix:/run/tinode.sock" it's a unix socket, otherwise TCP host:port.
-func netListener(addr string) (net.Listener, error) {
+func NetListener(addr string) (net.Listener, error) {
 	addrParts := strings.SplitN(addr, ":", 2)
 	if len(addrParts) == 2 && addrParts[0] == "unix" {
 		return net.Listen("unix", addrParts[1])
@@ -846,14 +848,14 @@ func netListener(addr string) (net.Listener, error) {
 }
 
 // Check if specified address is a unix socket like "unix:/run/tinode.sock".
-func isUnixAddr(addr string) bool {
+func IsUnixAddr(addr string) bool {
 	addrParts := strings.SplitN(addr, ":", 2)
 	return len(addrParts) == 2 && addrParts[0] == "unix"
 }
 
 var privateIPBlocks []*net.IPNet
 
-func isRoutableIP(ipStr string) bool {
+func IsRoutableIP(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return false
