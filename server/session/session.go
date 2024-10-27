@@ -7,7 +7,7 @@
  *
  *****************************************************************************/
 
-package server
+package session
 
 import (
 	"container/list"
@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/pbx"
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/logs"
@@ -163,20 +164,20 @@ type Session struct {
 // Subscription is a mapper of sessions to topics.
 type Subscription struct {
 	// Channel to communicate with the topic, copy of Topic.clientMsg
-	broadcast chan<- *ClientComMessage
+	broadcast chan<- *datamodel.ClientComMessage
 
 	// Session sends a signal to Topic when this session is unsubscribed
 	// This is a copy of Topic.unreg
-	done chan<- *ClientComMessage
+	done chan<- *datamodel.ClientComMessage
 
 	// Channel to send {meta} requests, copy of Topic.meta
-	meta chan<- *ClientComMessage
+	meta chan<- *datamodel.ClientComMessage
 
 	// Channel to ping topic with session's updates, copy of Topic.supd
 	supd chan<- *sessionUpdate
 }
 
-func (s *Session) addSub(topic string, sub *Subscription) {
+func (s *Session) AddSub(topic string, sub *Subscription) {
 	if s.multi != nil {
 		s.multi.addSub(topic, sub)
 		return
@@ -193,7 +194,7 @@ func (s *Session) addSub(topic string, sub *Subscription) {
 	s.subsLock.Unlock()
 }
 
-func (s *Session) getSub(topic string) *Subscription {
+func (s *Session) GetSub(topic string) *Subscription {
 	// Don't check s.multi here. Let it panic if called for proxy session.
 
 	s.subsLock.RLock()
@@ -202,7 +203,7 @@ func (s *Session) getSub(topic string) *Subscription {
 	return s.subs[topic]
 }
 
-func (s *Session) delSub(topic string) {
+func (s *Session) DelSub(topic string) {
 	if s.multi != nil {
 		s.multi.delSub(topic)
 		return
@@ -212,7 +213,7 @@ func (s *Session) delSub(topic string) {
 	s.subsLock.Unlock()
 }
 
-func (s *Session) countSub() int {
+func (s *Session) CountSub() int {
 	if s.multi != nil {
 		return s.multi.countSub()
 	}
@@ -221,7 +222,7 @@ func (s *Session) countSub() int {
 
 // Inform topics that the session is being terminated.
 // No need to check for s.multi because it's not called for PROXY sessions.
-func (s *Session) unsubAll() {
+func (s *Session) UnsubAll() {
 	s.subsLock.RLock()
 	defer s.subsLock.RUnlock()
 
@@ -229,34 +230,34 @@ func (s *Session) unsubAll() {
 		// sub.done is the same as topic.unreg
 		// The whole session is being dropped; ClientComMessage is a wrapper for session, ClientComMessage.init is false.
 		// keep redundant init: false so it can be searched for.
-		sub.done <- &ClientComMessage{sess: s, init: false}
+		sub.done <- &datamodel.ClientComMessage{sess: s, init: false}
 	}
 }
 
 // Indicates whether this session is a local interface for a remote proxy topic.
 // It multiplexes multiple sessions.
-func (s *Session) isMultiplex() bool {
+func (s *Session) IsMultiplex() bool {
 	return s.proto == MULTIPLEX
 }
 
 // Indicates whether this session is a short-lived proxy for a remote session.
-func (s *Session) isProxy() bool {
+func (s *Session) IsProxy() bool {
 	return s.proto == PROXY
 }
 
 // Cluster session: either a proxy or a multiplexing session.
-func (s *Session) isCluster() bool {
+func (s *Session) IsCluster() bool {
 	return s.isProxy() || s.isMultiplex()
 }
 
-func (s *Session) scheduleClusterWriteLoop() {
+func (s *Session) ScheduleClusterWriteLoop() {
 	if globals.cluster != nil && globals.cluster.proxyEventQueue != nil {
 		globals.cluster.proxyEventQueue.Schedule(
 			func() { s.clusterWriteLoop(s.proxiedTopic) })
 	}
 }
 
-func (s *Session) supportsMessageBatching() bool {
+func (s *Session) SupportsMessageBatching() bool {
 	switch s.proto {
 	case WEBSOCK:
 		return true
@@ -269,7 +270,7 @@ func (s *Session) supportsMessageBatching() bool {
 
 // queueOut attempts to send a list of ServerComMessages to a session write loop;
 // it fails if the send buffer is full.
-func (s *Session) queueOutBatch(msgs []*ServerComMessage) bool {
+func (s *Session) QueueOutBatch(msgs []*ServerComMessage) bool {
 	if s == nil {
 		return true
 	}
@@ -311,7 +312,7 @@ func (s *Session) queueOutBatch(msgs []*ServerComMessage) bool {
 
 // queueOut attempts to send a ServerComMessage to a session write loop;
 // it fails, if the send buffer is full.
-func (s *Session) queueOut(msg *ServerComMessage) bool {
+func (s *Session) QueueOut(msg *ServerComMessage) bool {
 	if s == nil {
 		return true
 	}
@@ -357,7 +358,7 @@ func (s *Session) queueOut(msg *ServerComMessage) bool {
 
 // queueOutBytes attempts to send a ServerComMessage already serialized to []byte.
 // If the send buffer is full, it fails.
-func (s *Session) queueOutBytes(data []byte) bool {
+func (s *Session) QueueOutBytes(data []byte) bool {
 	if s == nil || atomic.LoadInt32(&s.terminating) > 0 {
 		return true
 	}
@@ -374,7 +375,7 @@ func (s *Session) queueOutBytes(data []byte) bool {
 	return true
 }
 
-func (s *Session) maybeScheduleClusterWriteLoop() {
+func (s *Session) MaybeScheduleClusterWriteLoop() {
 	if s.multi != nil {
 		s.multi.scheduleClusterWriteLoop()
 		return
@@ -384,19 +385,19 @@ func (s *Session) maybeScheduleClusterWriteLoop() {
 	}
 }
 
-func (s *Session) detachSession(fromTopic string) {
+func (s *Session) DetachSession(fromTopic string) {
 	if atomic.LoadInt32(&s.terminating) == 0 {
 		s.detach <- fromTopic
 		s.maybeScheduleClusterWriteLoop()
 	}
 }
 
-func (s *Session) stopSession(data any) {
+func (s *Session) StopSession(data any) {
 	s.stop <- data
 	s.maybeScheduleClusterWriteLoop()
 }
 
-func (s *Session) purgeChannels() {
+func (s *Session) PurgeChannels() {
 	for len(s.send) > 0 {
 		<-s.send
 	}
@@ -409,7 +410,7 @@ func (s *Session) purgeChannels() {
 }
 
 // cleanUp is called when the session is terminated to perform resource cleanup.
-func (s *Session) cleanUp(expired bool) {
+func (s *Session) CleanUp(expired bool) {
 	atomic.StoreInt32(&s.terminating, 1)
 	s.purgeChannels()
 	s.inflightReqs.Wait()
@@ -428,9 +429,9 @@ func (s *Session) cleanUp(expired bool) {
 }
 
 // Message received, convert bytes to ClientComMessage and dispatch
-func (s *Session) dispatchRaw(raw []byte) {
+func (s *Session) DispatchRaw(raw []byte) {
 	now := types.TimeNow()
-	var msg ClientComMessage
+	var msg datamodel.ClientComMessage
 
 	if atomic.LoadInt32(&s.terminating) > 0 {
 		logs.Warn.Println("s.dispatch: message received on a terminating session", s.sid)
@@ -462,7 +463,7 @@ func (s *Session) dispatchRaw(raw []byte) {
 	s.dispatch(&msg)
 }
 
-func (s *Session) dispatch(msg *ClientComMessage) {
+func (s *Session) Dispatch(msg *datamodel.ClientComMessage) {
 	now := types.TimeNow()
 	atomic.StoreInt64(&s.lastAction, now.UnixNano())
 
@@ -506,12 +507,12 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 
 	msg.Timestamp = now
 
-	var handler func(*ClientComMessage)
+	var handler func(*datamodel.ClientComMessage)
 	var uaRefresh bool
 
 	// Check if s.ver is defined
-	checkVers := func(handler func(*ClientComMessage)) func(*ClientComMessage) {
-		return func(m *ClientComMessage) {
+	checkVers := func(handler func(*datamodel.ClientComMessage)) func(*datamodel.ClientComMessage) {
+		return func(m *datamodel.ClientComMessage) {
 			if s.ver == 0 {
 				logs.Warn.Println("s.dispatch: {hi} is missing", s.sid)
 				s.queueOut(ErrCommandOutOfSequence(m.Id, m.Original, msg.Timestamp))
@@ -522,8 +523,8 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 	}
 
 	// Check if user is logged in
-	checkUser := func(handler func(*ClientComMessage)) func(*ClientComMessage) {
-		return func(m *ClientComMessage) {
+	checkUser := func(handler func(*datamodel.ClientComMessage)) func(*datamodel.ClientComMessage) {
+		return func(m *datamodel.ClientComMessage) {
 			if msg.AsUser == "" {
 				logs.Warn.Println("s.dispatch: authentication required", s.sid)
 				s.queueOut(ErrAuthRequiredReply(m, m.Timestamp))
@@ -614,7 +615,7 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 }
 
 // Request to subscribe to a topic.
-func (s *Session) subscribe(msg *ClientComMessage) {
+func (s *Session) Subscribe(msg *datamodel.ClientComMessage) {
 	if strings.HasPrefix(msg.Original, "new") || strings.HasPrefix(msg.Original, "nch") {
 		// Request to create a new group/channel topic.
 		// If we are in a cluster, make sure the new topic belongs to the current node.
@@ -647,7 +648,7 @@ func (s *Session) subscribe(msg *ClientComMessage) {
 }
 
 // Leave/Unsubscribe a topic
-func (s *Session) leave(msg *ClientComMessage) {
+func (s *Session) Leave(msg *datamodel.ClientComMessage) {
 	// Expand topic name
 	var resp *ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
@@ -682,7 +683,7 @@ func (s *Session) leave(msg *ClientComMessage) {
 }
 
 // Broadcast a message to all topic subscribers
-func (s *Session) publish(msg *ClientComMessage) {
+func (s *Session) Publish(msg *datamodel.ClientComMessage) {
 	// TODO(gene): Check for repeated messages with the same ID
 	var resp *ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
@@ -731,7 +732,7 @@ func (s *Session) publish(msg *ClientComMessage) {
 }
 
 // Client metadata
-func (s *Session) hello(msg *ClientComMessage) {
+func (s *Session) Hello(msg *datamodel.ClientComMessage) {
 	var params map[string]any
 	var deviceIDUpdate bool
 
@@ -868,7 +869,7 @@ func (s *Session) hello(msg *ClientComMessage) {
 }
 
 // Account creation
-func (s *Session) acc(msg *ClientComMessage) {
+func (s *Session) Acc(msg *datamodel.ClientComMessage) {
 	newAcc := strings.HasPrefix(msg.Acc.User, "new")
 
 	// If temporary auth parameters are provided, get the user ID from them.
@@ -906,7 +907,7 @@ func (s *Session) acc(msg *ClientComMessage) {
 }
 
 // Authenticate
-func (s *Session) login(msg *ClientComMessage) {
+func (s *Session) Login(msg *datamodel.ClientComMessage) {
 	// msg.from is ignored here
 
 	if msg.Login.Scheme == "reset" {
@@ -983,7 +984,7 @@ func (s *Session) login(msg *ClientComMessage) {
 // authSecretReset resets an authentication secret;
 // params: "auth-method-to-reset:credential-method:credential-value",
 // for example: "basic:email:alice@example.com".
-func (s *Session) authSecretReset(params []byte) error {
+func (s *Session) AuthSecretReset(params []byte) error {
 	var authScheme, credMethod, credValue string
 	if parts := strings.Split(string(params), ":"); len(parts) >= 3 {
 		authScheme, credMethod, credValue = parts[0], parts[1], parts[2]
@@ -1039,7 +1040,7 @@ func (s *Session) authSecretReset(params []byte) error {
 }
 
 // onLogin performs steps after successful authentication.
-func (s *Session) onLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *ServerComMessage {
+func (s *Session) OnLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *ServerComMessage {
 	var reply *ServerComMessage
 	var params map[string]any
 
@@ -1091,7 +1092,7 @@ func (s *Session) onLogin(msgID string, timestamp time.Time, rec *auth.Rec, miss
 	return reply
 }
 
-func (s *Session) get(msg *ClientComMessage) {
+func (s *Session) Get(msg *datamodel.ClientComMessage) {
 	// Expand topic name.
 	var resp *ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
@@ -1129,7 +1130,7 @@ func (s *Session) get(msg *ClientComMessage) {
 	}
 }
 
-func (s *Session) set(msg *ClientComMessage) {
+func (s *Session) Set(msg *datamodel.ClientComMessage) {
 	// Expand topic name.
 	var resp *ServerComMessage
 	msg.RcptTo, resp = s.expandTopicName(msg)
@@ -1177,7 +1178,7 @@ func (s *Session) set(msg *ClientComMessage) {
 	}
 }
 
-func (s *Session) del(msg *ClientComMessage) {
+func (s *Session) Del(msg *datamodel.ClientComMessage) {
 	msg.MetaWhat = parseMsgClientDel(msg.Del.What)
 
 	// Delete user
@@ -1235,7 +1236,7 @@ func (s *Session) del(msg *ClientComMessage) {
 
 // Broadcast a transient message to active topic subscribers.
 // Not reporting any errors.
-func (s *Session) note(msg *ClientComMessage) {
+func (s *Session) Note(msg *datamodel.ClientComMessage) {
 	if s.ver == 0 || msg.AsUser == "" {
 		// Silently ignore the message: have not received {hi} or don't know who sent the message.
 		return
@@ -1310,7 +1311,7 @@ func (s *Session) note(msg *ClientComMessage) {
 //	topic: session-specific topic name the message recipient should see
 //	routeTo: routable global topic name
 //	err: *ServerComMessage with an error to return to the sender
-func (s *Session) expandTopicName(msg *ClientComMessage) (string, *ServerComMessage) {
+func (s *Session) ExpandTopicName(msg *datamodel.ClientComMessage) (string, *ServerComMessage) {
 	if msg.Original == "" {
 		logs.Warn.Println("s.etn: empty topic name", s.sid)
 		return "", ErrMalformed(msg.Id, "", msg.Timestamp)
@@ -1345,7 +1346,7 @@ func (s *Session) expandTopicName(msg *ClientComMessage) (string, *ServerComMess
 	return routeTo, nil
 }
 
-func (s *Session) serializeAndUpdateStats(msg *ServerComMessage) any {
+func (s *Session) SerializeAndUpdateStats(msg *ServerComMessage) any {
 	dataSize, data := s.serialize(msg)
 	if dataSize >= 0 {
 		statsAddHistSample("OutgoingMessageSize", float64(dataSize))
@@ -1353,7 +1354,7 @@ func (s *Session) serializeAndUpdateStats(msg *ServerComMessage) any {
 	return data
 }
 
-func (s *Session) serialize(msg *ServerComMessage) (int, any) {
+func (s *Session) Serialize(msg *ServerComMessage) (int, any) {
 	if s.proto == GRPC {
 		msg := pbServSerialize(msg)
 		// TODO: calculate and return the size of `msg`.
@@ -1370,7 +1371,7 @@ func (s *Session) serialize(msg *ServerComMessage) (int, any) {
 }
 
 // onBackgroundTimer marks background session as foreground and informs topics it's subscribed to.
-func (s *Session) onBackgroundTimer() {
+func (s *Session) OnBackgroundTimer() {
 	s.subsLock.RLock()
 	defer s.subsLock.RUnlock()
 

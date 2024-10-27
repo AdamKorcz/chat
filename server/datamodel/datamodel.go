@@ -15,8 +15,46 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/store/types"
 )
+
+type Session interface {
+	AddSub(topic string, sub *Subscription)
+	GetSub(topic string) *Subscription
+	DelSub(topic string)
+	CountSub() int
+	UnsubAll()
+	IsMultiplex() bool
+	IsProxy() bool
+	IsCluster() bool
+	ScheduleClusterWriteLoop()
+	SupportsMessageBatching()
+	QueueOutBatch(msgs []*ServerComMessage) bool
+	QueueOut(msg *ServerComMessage) bool
+	QueueOutBytes(data []byte) bool
+	MaybeScheduleClusterWriteLoop()
+	DetachSession(fromTopic string)
+	StopSession(data any)
+	CleanUp(expired bool)
+	DispatchRaw(raw []byte)
+	Dispatch(msg *ClientComMessage)
+	Subscribe(msg *ClientComMessage)
+	Leave(msg *ClientComMessage)
+	Publish(msg *ClientComMessage)
+	Hello(msg *ClientComMessage)
+	Acc(msg *ClientComMessage)
+	Login(msg *ClientComMessage)
+	AuthSecretReset(params []byte) error
+	OnLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *ServerComMessage
+	Get(msg *ClientComMessage)
+	Set(msg *ClientComMessage)
+	Del(msg *ClientComMessage)
+	Note(msg *ClientComMessage)
+	ExpandTopicName(msg *ClientComMessage)
+	SerializeAndUpdateStats(msg *ServerComMessage) any
+	OnBackgroundTimer()
+}
 
 // MsgGetOpts defines Get query parameters.
 type MsgGetOpts struct {
