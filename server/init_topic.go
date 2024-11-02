@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -63,7 +64,7 @@ func topicInit(t *Topic, join *ClientComMessage, h *Hub) {
 		h.topicDel(join.RcptTo)
 
 		logs.Err.Println("init_topic: failed to load or create topic:", join.RcptTo, err)
-		join.sess.queueOut(decodeStoreErrorExplicitTs(err, join.Id, t.xoriginal, timestamp, join.Timestamp, nil))
+		join.sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, join.Id, t.xoriginal, timestamp, join.Timestamp, nil))
 
 		// Re-queue pending requests to join the topic.
 		for len(t.reg) > 0 {

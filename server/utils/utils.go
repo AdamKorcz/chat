@@ -3,10 +3,10 @@
 package utils
 
 import (
-	"crypto/tls"
-	"encoding/json"
-	"errors"
-	"fmt"
+	//"crypto/tls"
+	//"encoding/json"
+	//"errors"
+	//"fmt"
 	"net"
 	"path/filepath"
 	"reflect"
@@ -14,18 +14,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
+	//"time"
 	"unicode"
-	"unicode/utf8"
+	//"unicode/utf8"
 
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/datamodel"
-	"github.com/tinode/chat/server/globals"
-	"github.com/tinode/chat/server/logs"
-	"github.com/tinode/chat/server/store"
+	//"github.com/tinode/chat/server/globals"
+	//"github.com/tinode/chat/server/logs"
+	//"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 
-	"golang.org/x/crypto/acme/autocert"
+	//"golang.org/x/crypto/acme/autocert"
 )
 
 // Tag with prefix:
@@ -55,7 +55,7 @@ func DelrangeDeserialize(in []types.Range) []datamodel.MsgDelRange {
 
 // Trim whitespace, remove short/empty tags and duplicates, convert to lowercase, ensure
 // the number of tags does not exceed the maximum.
-func NormalizeTags(src []string) types.StringSlice {
+/*func NormalizeTags(src []string) types.StringSlice {
 	if src == nil {
 		return nil
 	}
@@ -103,7 +103,7 @@ func NormalizeTags(src []string) types.StringSlice {
 	}
 
 	return types.StringSlice(dst)
-}
+}*/
 
 // stringSliceDelta extracts the slices of added and removed strings from two slices:
 //
@@ -155,8 +155,8 @@ func StringSliceDelta(rold, rnew []string) (added, removed, intersection []strin
 // restrictedTagsEqual checks if two sets of tags contain the same set of restricted tags:
 // true - same, false - different.
 func RestrictedTagsEqual(oldTags, newTags []string, namespaces map[string]bool) bool {
-	rold := filterRestrictedTags(oldTags, namespaces)
-	rnew := filterRestrictedTags(newTags, namespaces)
+	rold := FilterRestrictedTags(oldTags, namespaces)
+	rnew := FilterRestrictedTags(newTags, namespaces)
 
 	if len(rold) != len(rnew) {
 		return false
@@ -178,7 +178,7 @@ func RestrictedTagsEqual(oldTags, newTags []string, namespaces map[string]bool) 
 // Process credentials for correctness: remove duplicate and unknown methods.
 // In case of duplicate methods only the first one satisfying valueRequired is kept.
 // If valueRequired is true, keep only those where Value is non-empty.
-func NormalizeCredentials(creds []datamodel.MsgCredClient, valueRequired bool) []datamodel.MsgCredClient {
+/*func NormalizeCredentials(creds []datamodel.MsgCredClient, valueRequired bool) []datamodel.MsgCredClient {
 	if len(creds) == 0 {
 		return nil
 	}
@@ -195,7 +195,7 @@ func NormalizeCredentials(creds []datamodel.MsgCredClient, valueRequired bool) [
 		creds = append(creds, *index[c.Method])
 	}
 	return creds
-}
+}*/
 
 // Get a string slice with methods of credentials.
 func CredentialMethods(creds []datamodel.MsgCredClient) []string {
@@ -206,83 +206,12 @@ func CredentialMethods(creds []datamodel.MsgCredClient) []string {
 	return out
 }
 
-// Takes MsgClientGet query parameters, returns database query parameters
-func MsgOpts2storeOpts(req *MsgGetOpts) *types.QueryOpt {
-	var opts *types.QueryOpt
-	if req != nil {
-		opts = &types.QueryOpt{
-			User:            types.ParseUserId(req.User),
-			Topic:           req.Topic,
-			IfModifiedSince: req.IfModifiedSince,
-			Limit:           req.Limit,
-			Since:           req.SinceId,
-			Before:          req.BeforeId,
-		}
-	}
-	return opts
-}
-
 // Check if the interface contains a string with a single Unicode Del control character.
 func IsNullValue(i any) bool {
 	if str, ok := i.(string); ok {
 		return str == nullValue
 	}
 	return false
-}
-
-func DecodeStoreError(err error, id string, ts time.Time, params map[string]any) *datamodel.ServerComMessage {
-	return decodeStoreErrorExplicitTs(err, id, "", ts, ts, params)
-}
-
-func DecodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingReqTs time.Time,
-	params map[string]any) *datamodel.ServerComMessage {
-
-	var errmsg *datamodel.ServerComMessage
-
-	if err == nil {
-		errmsg = NoErrExplicitTs(id, topic, serverTs, incomingReqTs)
-	} else if storeErr, ok := err.(types.StoreError); !ok {
-		errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
-	} else {
-		switch storeErr {
-		case types.ErrInternal:
-			errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
-		case types.ErrMalformed:
-			errmsg = ErrMalformedExplicitTs(id, topic, serverTs, incomingReqTs)
-		case types.ErrFailed:
-			errmsg = ErrAuthFailed(id, topic, serverTs, incomingReqTs)
-		case types.ErrPermissionDenied:
-			errmsg = ErrPermissionDeniedExplicitTs(id, topic, serverTs, incomingReqTs)
-		case types.ErrDuplicate:
-			errmsg = ErrDuplicateCredential(id, topic, serverTs, incomingReqTs)
-		case types.ErrUnsupported:
-			errmsg = ErrNotImplemented(id, topic, serverTs, incomingReqTs)
-		case types.ErrExpired:
-			errmsg = ErrAuthFailed(id, topic, serverTs, incomingReqTs)
-		case types.ErrPolicy:
-			errmsg = ErrPolicyExplicitTs(id, topic, serverTs, incomingReqTs)
-		case types.ErrCredentials:
-			errmsg = InfoValidateCredentialsExplicitTs(id, serverTs, incomingReqTs)
-		case types.ErrUserNotFound:
-			errmsg = ErrUserNotFound(id, topic, serverTs, incomingReqTs)
-		case types.ErrTopicNotFound:
-			errmsg = ErrTopicNotFound(id, topic, serverTs, incomingReqTs)
-		case types.ErrNotFound:
-			errmsg = ErrNotFoundExplicitTs(id, topic, serverTs, incomingReqTs)
-		case types.ErrInvalidResponse:
-			errmsg = ErrInvalidResponse(id, topic, serverTs, incomingReqTs)
-		case types.ErrRedirected:
-			errmsg = InfoUseOther(id, topic, params["topic"].(string), serverTs, incomingReqTs)
-		default:
-			errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
-		}
-	}
-
-	if params != nil {
-		errmsg.Ctrl.Params = params
-	}
-
-	return errmsg
 }
 
 // Helper function to select access mode for the given auth level
@@ -341,7 +270,7 @@ func ParseTopicAccess(acs *datamodel.MsgDefaultAcsMode, defAuth, defAnon types.A
 }
 
 // Parse one component of a semantic version string.
-func ParseVersionPart(vers string) int {
+func parseVersionPart(vers string) int {
 	end := strings.IndexFunc(vers, func(r rune) bool {
 		return !unicode.IsDigit(r)
 	})
@@ -426,221 +355,6 @@ func FilterRestrictedTags(tags []string, namespaces map[string]bool) []string {
 	return out
 }
 
-// rewriteTag attempts to match the original token against the email, telephone number and optionally login patterns.
-// The tag is expected to be converted to lowercase.
-// On success, it prepends the token with the corresponding prefix. It returns an empty string if the tag is invalid.
-// TODO: consider inferring country code from user location.
-func RewriteTag(orig, countryCode string, withLogin bool) string {
-	// Check if the tag already has a prefix e.g. basic:alice.
-	if prefixedTagRegexp.MatchString(orig) {
-		return orig
-	}
-
-	// Check if token can be rewritten by any of the validators
-	param := map[string]any{"countryCode": countryCode}
-	for name, conf := range globals.Globals.validators {
-		if conf.addToTags {
-			val := store.Store.GetValidator(name)
-			if tag, _ := val.PreCheck(orig, param); tag != "" {
-				return tag
-			}
-		}
-	}
-
-	// Try authenticators now.
-	if withLogin {
-		auths := store.Store.GetAuthNames()
-		for _, name := range auths {
-			auth := store.Store.GetAuthHandler(name)
-			if tag := auth.AsTag(orig); tag != "" {
-				return tag
-			}
-		}
-	}
-
-	if tagRegexp.MatchString(orig) {
-		return orig
-	}
-
-	logs.Warn.Printf("invalid generic tag '%s'", orig)
-
-	return ""
-}
-
-// Parser for search queries. The query may contain non-ASCII characters,
-// i.e. length of string in bytes != length of string in runes.
-// Returns
-// * required tags: AND of ORs of tags (at least one of each subset must be present in every result),
-// * optional tags
-// * error.
-func ParseSearchQuery(query, countryCode string, withLogin bool) ([][]string, []string, error) {
-	const (
-		NONE = iota
-		QUO
-		AND
-		OR
-		END
-		ORD
-	)
-	type token struct {
-		op           int
-		val          string
-		rewrittenVal string
-	}
-	type context struct {
-		// Pre-token operand
-		preOp int
-		// Post-token operand
-		postOp int
-		// Inside quoted string
-		quo bool
-		// Current token is a quoted string
-		unquote bool
-		// Start of the current token
-		start int
-		// End of the current token
-		end int
-	}
-	ctx := context{preOp: AND}
-	var out []token
-	var prev int
-	query = strings.TrimSpace(query)
-	// Split query into tokens.
-	for i, w, pos := 0, 0, 0; prev != END; i, pos = i+w, pos+1 {
-		//
-		var emit bool
-
-		// Lexer: get next rune.
-		var r rune
-		curr := ORD
-		r, w = utf8.DecodeRuneInString(query[i:])
-		switch {
-		case w == 0:
-			curr = END
-		case r == '"':
-			curr = QUO
-		case !ctx.quo:
-			if r == ' ' || r == '\t' {
-				curr = AND
-			} else if r == ',' {
-				curr = OR
-			}
-		}
-
-		if curr == QUO {
-			if ctx.quo {
-				// End of the quoted string. Close the quote.
-				ctx.quo = false
-			} else {
-				if prev == ORD {
-					// Reject strings like a"b
-					return nil, nil, fmt.Errorf("missing operator at or near %d", pos)
-				}
-				// Start of the quoted string. Open the quote.
-				ctx.quo = true
-				ctx.unquote = true
-			}
-			curr = ORD
-		}
-
-		// Parser: process the current lexem in context.
-		switch curr {
-		case OR:
-			if ctx.postOp == OR {
-				// More than one comma: ' , ,,'
-				return nil, nil, fmt.Errorf("invalid operator sequence at or near %d", pos)
-			}
-			// Ensure context is not "and", i.e. the case like ' ,' -> ','
-			ctx.postOp = OR
-			if prev == ORD {
-				// Close the current token.
-				ctx.end = i
-			}
-		case AND:
-			if prev == ORD {
-				// Close the current token.
-				ctx.end = i
-				ctx.postOp = AND
-			} else if ctx.postOp != OR {
-				// "and" does not change the "or" context.
-				ctx.postOp = AND
-			}
-		case ORD:
-			if prev == OR || prev == AND {
-				// Ordinary character after a comma or a space: ' a' or ',a'.
-				// Emit without changing the operation.
-				emit = true
-			}
-		case END:
-			if prev == ORD {
-				// Close the current token.
-				ctx.end = i
-			}
-			emit = true
-		}
-
-		if emit {
-			if ctx.quo {
-				return nil, nil, fmt.Errorf("unterminated quoted string at or near %d", pos)
-			}
-
-			// Emit the new token.
-			op := ctx.preOp
-			if ctx.postOp == OR {
-				op = OR
-			}
-			start, end := ctx.start, ctx.end
-			if ctx.unquote {
-				start++
-				end--
-			}
-			// Add token if non-empty.
-			if start < end {
-				original := strings.ToLower(query[start:end])
-				rewritten := rewriteTag(original, countryCode, withLogin)
-				// The 'rewritten' equals to "" means the token is invalid.
-				if rewritten != "" {
-					t := token{val: original, op: op}
-					if rewritten != original {
-						t.rewrittenVal = rewritten
-					}
-					out = append(out, t)
-				}
-			}
-			ctx.start = i
-			ctx.preOp = ctx.postOp
-			ctx.postOp = NONE
-			ctx.unquote = false
-		}
-
-		prev = curr
-	}
-
-	if len(out) == 0 {
-		return nil, nil, nil
-	}
-
-	// Convert tokens to two string slices.
-	var and [][]string
-	var or []string
-	for _, t := range out {
-		switch t.op {
-		case AND:
-			var terms []string
-			terms = append(terms, t.val)
-			if len(t.rewrittenVal) > 0 {
-				terms = append(terms, t.rewrittenVal)
-			}
-			and = append(and, terms)
-		case OR:
-			or = append(or, t.val)
-			if len(t.rewrittenVal) > 0 {
-				or = append(or, t.rewrittenVal)
-			}
-		}
-	}
-	return and, or, nil
-}
 
 // Returns > 0 if v1 > v2; zero if equal; < 0 if v1 < v2
 // Only Major and Minor parts are compared, the trailer is ignored.
@@ -695,7 +409,7 @@ func PlatformFromUA(ua string) string {
 	return ""
 }
 
-func ParseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, error) {
+/*func ParseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, error) {
 	type tlsAutocertConfig struct {
 		// Domains to support by autocert
 		Domains []string `json:"domains"`
@@ -755,7 +469,7 @@ func ParseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, err
 	}
 
 	return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
-}
+}*/
 
 // Merge source interface{} into destination interface.
 // If values are maps,deep-merge them. Otherwise shallow-copy.
@@ -793,7 +507,7 @@ func MergeInterfaces(dst, src any) (any, bool) {
 }
 
 // Deep copy maps.
-func MergeMaps(dst, src map[string]any) (map[string]any, bool) {
+func mergeMaps(dst, src map[string]any) (map[string]any, bool) {
 	var changed bool
 
 	if len(src) == 0 {

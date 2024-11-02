@@ -1748,3 +1748,58 @@ func ErrVersionNotSupported(id string, ts time.Time) *ServerComMessage {
 		Timestamp: ts,
 	}
 }
+
+func DecodeStoreError(err error, id string, ts time.Time, params map[string]any) *ServerComMessage {
+	return DecodeStoreErrorExplicitTs(err, id, "", ts, ts, params)
+}
+
+func DecodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingReqTs time.Time,
+	params map[string]any) *ServerComMessage {
+
+	var errmsg *ServerComMessage
+
+	if err == nil {
+		errmsg = NoErrExplicitTs(id, topic, serverTs, incomingReqTs)
+	} else if storeErr, ok := err.(types.StoreError); !ok {
+		errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
+	} else {
+		switch storeErr {
+		case types.ErrInternal:
+			errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
+		case types.ErrMalformed:
+			errmsg = ErrMalformedExplicitTs(id, topic, serverTs, incomingReqTs)
+		case types.ErrFailed:
+			errmsg = ErrAuthFailed(id, topic, serverTs, incomingReqTs)
+		case types.ErrPermissionDenied:
+			errmsg = ErrPermissionDeniedExplicitTs(id, topic, serverTs, incomingReqTs)
+		case types.ErrDuplicate:
+			errmsg = ErrDuplicateCredential(id, topic, serverTs, incomingReqTs)
+		case types.ErrUnsupported:
+			errmsg = ErrNotImplemented(id, topic, serverTs, incomingReqTs)
+		case types.ErrExpired:
+			errmsg = ErrAuthFailed(id, topic, serverTs, incomingReqTs)
+		case types.ErrPolicy:
+			errmsg = ErrPolicyExplicitTs(id, topic, serverTs, incomingReqTs)
+		case types.ErrCredentials:
+			errmsg = InfoValidateCredentialsExplicitTs(id, serverTs, incomingReqTs)
+		case types.ErrUserNotFound:
+			errmsg = ErrUserNotFound(id, topic, serverTs, incomingReqTs)
+		case types.ErrTopicNotFound:
+			errmsg = ErrTopicNotFound(id, topic, serverTs, incomingReqTs)
+		case types.ErrNotFound:
+			errmsg = ErrNotFoundExplicitTs(id, topic, serverTs, incomingReqTs)
+		case types.ErrInvalidResponse:
+			errmsg = ErrInvalidResponse(id, topic, serverTs, incomingReqTs)
+		case types.ErrRedirected:
+			errmsg = InfoUseOther(id, topic, params["topic"].(string), serverTs, incomingReqTs)
+		default:
+			errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
+		}
+	}
+
+	if params != nil {
+		errmsg.Ctrl.Params = params
+	}
+
+	return errmsg
+}

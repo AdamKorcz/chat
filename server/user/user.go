@@ -217,6 +217,25 @@ func replyCreateUser(s *session.Session, msg *ClientComMessage, rec *auth.Rec) {
 	pluginAccount(&user, plgActCreate)
 }
 
+func normalizeCredentials(creds []datamodel.MsgCredClient, valueRequired bool) []datamodel.MsgCredClient {
+	if len(creds) == 0 {
+		return nil
+	}
+
+	index := make(map[string]*datamodel.MsgCredClient)
+	for i := range creds {
+		c := &creds[i]
+		if _, ok := globals.Globals.validators[c.Method]; ok && (!valueRequired || c.Value != "") {
+			index[c.Method] = c
+		}
+	}
+	creds = make([]datamodel.MsgCredClient, 0, len(index))
+	for _, c := range index {
+		creds = append(creds, *index[c.Method])
+	}
+	return creds
+}
+
 // Process update to an account:
 // * Authentication update, i.e. login/password change
 // * Credentials update

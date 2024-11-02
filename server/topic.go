@@ -16,8 +16,10 @@ import (
 
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/logs"
+	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
+	"github.com/tinode/chat/server/utils"
 )
 
 // Topic is an isolated communication channel
@@ -326,6 +328,181 @@ func (t *Topic) unregisterSession(msg *ClientComMessage) {
 	if len(t.sessions) == 0 && t.cat != types.TopicCatSys {
 		t.killTimer.Reset(idleMasterTopicTimeout)
 	}
+}
+
+// Parser for search queries. The query may contain non-ASCII characters,
+// i.e. length of string in bytes != length of string in runes.
+// Returns
+// * required tags: AND of ORs of tags (at least one of each subset must be present in every result),
+// * optional tags
+// * error.
+func parseSearchQuery(query, countryCode string, withLogin bool) ([][]string, []string, error) {
+	const (
+		NONE = iota
+		QUO
+		AND
+		OR
+		END
+		ORD
+	)
+	type token struct {
+		op           int
+		val          string
+		rewrittenVal string
+	}
+	type context struct {
+		// Pre-token operand
+		preOp int
+		// Post-token operand
+		postOp int
+		// Inside quoted string
+		quo bool
+		// Current token is a quoted string
+		unquote bool
+		// Start of the current token
+		start int
+		// End of the current token
+		end int
+	}
+	ctx := context{preOp: AND}
+	var out []token
+	var prev int
+	query = strings.TrimSpace(query)
+	// Split query into tokens.
+	for i, w, pos := 0, 0, 0; prev != END; i, pos = i+w, pos+1 {
+		//
+		var emit bool
+
+		// Lexer: get next rune.
+		var r rune
+		curr := ORD
+		r, w = utf8.DecodeRuneInString(query[i:])
+		switch {
+		case w == 0:
+			curr = END
+		case r == '"':
+			curr = QUO
+		case !ctx.quo:
+			if r == ' ' || r == '\t' {
+				curr = AND
+			} else if r == ',' {
+				curr = OR
+			}
+		}
+
+		if curr == QUO {
+			if ctx.quo {
+				// End of the quoted string. Close the quote.
+				ctx.quo = false
+			} else {
+				if prev == ORD {
+					// Reject strings like a"b
+					return nil, nil, fmt.Errorf("missing operator at or near %d", pos)
+				}
+				// Start of the quoted string. Open the quote.
+				ctx.quo = true
+				ctx.unquote = true
+			}
+			curr = ORD
+		}
+
+		// Parser: process the current lexem in context.
+		switch curr {
+		case OR:
+			if ctx.postOp == OR {
+				// More than one comma: ' , ,,'
+				return nil, nil, fmt.Errorf("invalid operator sequence at or near %d", pos)
+			}
+			// Ensure context is not "and", i.e. the case like ' ,' -> ','
+			ctx.postOp = OR
+			if prev == ORD {
+				// Close the current token.
+				ctx.end = i
+			}
+		case AND:
+			if prev == ORD {
+				// Close the current token.
+				ctx.end = i
+				ctx.postOp = AND
+			} else if ctx.postOp != OR {
+				// "and" does not change the "or" context.
+				ctx.postOp = AND
+			}
+		case ORD:
+			if prev == OR || prev == AND {
+				// Ordinary character after a comma or a space: ' a' or ',a'.
+				// Emit without changing the operation.
+				emit = true
+			}
+		case END:
+			if prev == ORD {
+				// Close the current token.
+				ctx.end = i
+			}
+			emit = true
+		}
+
+		if emit {
+			if ctx.quo {
+				return nil, nil, fmt.Errorf("unterminated quoted string at or near %d", pos)
+			}
+
+			// Emit the new token.
+			op := ctx.preOp
+			if ctx.postOp == OR {
+				op = OR
+			}
+			start, end := ctx.start, ctx.end
+			if ctx.unquote {
+				start++
+				end--
+			}
+			// Add token if non-empty.
+			if start < end {
+				original := strings.ToLower(query[start:end])
+				rewritten := rewriteTag(original, countryCode, withLogin)
+				// The 'rewritten' equals to "" means the token is invalid.
+				if rewritten != "" {
+					t := token{val: original, op: op}
+					if rewritten != original {
+						t.rewrittenVal = rewritten
+					}
+					out = append(out, t)
+				}
+			}
+			ctx.start = i
+			ctx.preOp = ctx.postOp
+			ctx.postOp = NONE
+			ctx.unquote = false
+		}
+
+		prev = curr
+	}
+
+	if len(out) == 0 {
+		return nil, nil, nil
+	}
+
+	// Convert tokens to two string slices.
+	var and [][]string
+	var or []string
+	for _, t := range out {
+		switch t.op {
+		case AND:
+			var terms []string
+			terms = append(terms, t.val)
+			if len(t.rewrittenVal) > 0 {
+				terms = append(terms, t.rewrittenVal)
+			}
+			and = append(and, terms)
+		case OR:
+			or = append(or, t.val)
+			if len(t.rewrittenVal) > 0 {
+				or = append(or, t.rewrittenVal)
+			}
+		}
+	}
+	return and, or, nil
 }
 
 // registerSession handles a session join (registration) request
@@ -2433,7 +2610,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 					if len(req) > 0 || len(opt) > 0 {
 						// Check if the query contains terms that the user is not allowed to use.
 						allReq := types.FlattenDoubleSlice(req)
-						restr, _, _ := stringSliceDelta(t.tags, filterRestrictedTags(append(allReq, opt...),
+						restr, _, _ := stringSliceDelta(t.tags, utils.FilterRestrictedTags(append(allReq, opt...),
 							globals.maskedTagNS))
 
 						if len(restr) > 0 {
@@ -2445,7 +2622,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 						// Root users: find all topics and accounts, including suspended and soft-deleted.
 						subs, err = store.Users.FindSubs(asUid, req, opt, sess.authLvl != auth.LevelRoot)
 						if err != nil {
-							sess.queueOut(decodeStoreErrorExplicitTs(err, id, msg.Original, now, incomingReqTs, nil))
+							sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, id, msg.Original, now, incomingReqTs, nil))
 							return err
 						}
 
@@ -2493,7 +2670,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 	}
 
 	if err != nil {
-		sess.queueOut(decodeStoreErrorExplicitTs(err, id, msg.Original, now, incomingReqTs, nil))
+		sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, id, msg.Original, now, incomingReqTs, nil))
 		return err
 	}
 
@@ -2868,7 +3045,7 @@ func (t *Topic) replyGetCreds(sess *Session, asUid types.Uid, msg *ClientComMess
 
 	screds, err := store.Users.GetAllCreds(asUid, "", false)
 	if err != nil {
-		sess.queueOut(decodeStoreErrorExplicitTs(err, id, msg.Original, now, msg.Timestamp, nil))
+		sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, id, msg.Original, now, msg.Timestamp, nil))
 		return err
 	}
 
@@ -2927,7 +3104,7 @@ func (t *Topic) replySetCred(sess *Session, asUid types.Uid, authLevel auth.Leve
 		t.presSubsOnline("tags", "", nilPresParams, nilPresFilters, "")
 	}
 
-	sess.queueOut(decodeStoreErrorExplicitTs(err, set.Id, t.original(asUid), now, incomingReqTs, nil))
+	sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, set.Id, t.original(asUid), now, incomingReqTs, nil))
 
 	return err
 }
@@ -3127,7 +3304,7 @@ func (t *Topic) replyDelCred(sess *Session, asUid types.Uid, authLvl auth.Level,
 		sess.queueOut(InfoNoActionReply(msg, now))
 		return nil
 	}
-	sess.queueOut(decodeStoreErrorExplicitTs(err, del.Id, del.Topic, now, incomingReqTs, nil))
+	sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, del.Id, del.Topic, now, incomingReqTs, nil))
 	return err
 }
 
@@ -3786,4 +3963,62 @@ func topicNameForUser(name string, uid types.Uid, isChan bool) string {
 		}
 	}
 	return name
+}
+
+
+// Takes MsgClientGet query parameters, returns database query parameters
+func msgOpts2storeOpts(req *datamodel.MsgGetOpts) *types.QueryOpt {
+	var opts *types.QueryOpt
+	if req != nil {
+		opts = &types.QueryOpt{
+			User:            types.ParseUserId(req.User),
+			Topic:           req.Topic,
+			IfModifiedSince: req.IfModifiedSince,
+			Limit:           req.Limit,
+			Since:           req.SinceId,
+			Before:          req.BeforeId,
+		}
+	}
+	return opts
+}
+
+// rewriteTag attempts to match the original token against the email, telephone number and optionally login patterns.
+// The tag is expected to be converted to lowercase.
+// On success, it prepends the token with the corresponding prefix. It returns an empty string if the tag is invalid.
+// TODO: consider inferring country code from user location.
+func rewriteTag(orig, countryCode string, withLogin bool) string {
+	// Check if the tag already has a prefix e.g. basic:alice.
+	if prefixedTagRegexp.MatchString(orig) {
+		return orig
+	}
+
+	// Check if token can be rewritten by any of the validators
+	param := map[string]any{"countryCode": countryCode}
+	for name, conf := range globals.Globals.validators {
+		if conf.addToTags {
+			val := store.Store.GetValidator(name)
+			if tag, _ := val.PreCheck(orig, param); tag != "" {
+				return tag
+			}
+		}
+	}
+
+	// Try authenticators now.
+	if withLogin {
+		auths := store.Store.GetAuthNames()
+		for _, name := range auths {
+			auth := store.Store.GetAuthHandler(name)
+			if tag := auth.AsTag(orig); tag != "" {
+				return tag
+			}
+		}
+	}
+
+	if tagRegexp.MatchString(orig) {
+		return orig
+	}
+
+	logs.Warn.Printf("invalid generic tag '%s'", orig)
+
+	return ""
 }

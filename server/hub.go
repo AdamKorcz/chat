@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -612,7 +613,7 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 		stopic, err := store.Topics.Get(topic)
 		if err != nil {
 			logs.Info.Println("replyOfflineTopicGetDesc", err)
-			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+			sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 			return
 		}
 		if stopic == nil {
@@ -663,7 +664,7 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 
 		suser, err := store.Users.Get(uid)
 		if err != nil {
-			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+			sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 			return
 		}
 		if suser == nil {
@@ -690,7 +691,7 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 	sub, err := store.Subs.Get(topic, asUid, false)
 	if err != nil {
 		logs.Warn.Println("replyOfflineTopicGetDesc:", err)
-		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+		sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		return
 	}
 
@@ -730,7 +731,7 @@ func replyOfflineTopicGetSub(sess *Session, msg *ClientComMessage) {
 	ssub, err := store.Subs.Get(topicName, types.ParseUserId(msg.AsUser), true)
 	if err != nil {
 		logs.Warn.Println("replyOfflineTopicGetSub:", err)
-		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+		sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		return
 	}
 
@@ -795,7 +796,7 @@ func replyOfflineTopicSetSub(sess *Session, msg *ClientComMessage) {
 	sub, err := store.Subs.Get(topicName, asUid, false)
 	if err != nil {
 		logs.Warn.Println("replyOfflineTopicSetSub get sub:", err)
-		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+		sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		return
 	}
 
@@ -818,7 +819,7 @@ func replyOfflineTopicSetSub(sess *Session, msg *ClientComMessage) {
 		var modeWant types.AccessMode
 		if err = modeWant.UnmarshalText([]byte(msg.Set.Sub.Mode)); err != nil {
 			logs.Warn.Println("replyOfflineTopicSetSub mode:", err)
-			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+			sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 			return
 		}
 
@@ -845,7 +846,7 @@ func replyOfflineTopicSetSub(sess *Session, msg *ClientComMessage) {
 		err = store.Subs.Update(topicName, asUid, update)
 		if err != nil {
 			logs.Warn.Println("replyOfflineTopicSetSub update:", err)
-			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
+			sess.queueOut(datamodel.DecodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		} else {
 			var params any
 			if update["ModeWant"] != nil {
