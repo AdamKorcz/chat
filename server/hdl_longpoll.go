@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/logs"
+	"github.com/tinode/chat/server/globals"
 )
 
 func (sess *Session) sendMessageLp(wrt http.ResponseWriter, msg any) bool {
@@ -25,7 +26,7 @@ func (sess *Session) sendMessageLp(wrt http.ResponseWriter, msg any) bool {
 		return false
 	}
 
-	statsInc("OutgoingMessagesLongpollTotal", 1)
+	globals.StatsInc("OutgoingMessagesLongpollTotal", 1)
 	if err := lpWrite(wrt, msg); err != nil {
 		logs.Err.Println("longPoll: writeOnce failed", sess.sid, err)
 		return false
@@ -105,7 +106,7 @@ func (sess *Session) readOnce(wrt http.ResponseWriter, req *http.Request) (int, 
 		// Locking-unlocking is needed because the client may issue multiple requests in parallel.
 		// Should not affect performance
 		sess.lock.Lock()
-		statsInc("IncomingMessagesLongpollTotal", 1)
+		globals.StatsInc("IncomingMessagesLongpollTotal", 1)
 		sess.dispatchRaw(raw)
 		sess.lock.Unlock()
 		return 0, nil

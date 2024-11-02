@@ -16,6 +16,7 @@ import (
 
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/datamodel"
+	"github.com/tinode/chat/server/globals"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -87,19 +88,19 @@ type Hub struct {
 	shutdown chan chan<- bool
 }
 
-func (h *Hub) topicGet(name string) *Topic {
+func (h *Hub) TopicGet(name string) *Topic {
 	if t, ok := h.topics.Load(name); ok {
 		return t.(*Topic)
 	}
 	return nil
 }
 
-func (h *Hub) topicPut(name string, t *Topic) {
+func (h *Hub) TopicPut(name string, t *Topic) {
 	h.numTopics++
 	h.topics.Store(name, t)
 }
 
-func (h *Hub) topicDel(name string) {
+func (h *Hub) TopicDel(name string) {
 	h.numTopics--
 	h.topics.Delete(name)
 }
@@ -430,7 +431,7 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 				h.topicDel(topic)
 				t.markDeleted()
 				t.exit <- &shutDown{reason: StopDeleted}
-				statsInc("LiveTopics", -1)
+				globals.StatsInc("LiveTopics", -1)
 			} else {
 				// Case 1.1.2: requester is NOT the owner or not empty P2P.
 				msg.MetaWhat = constMsgDelTopic
@@ -549,7 +550,7 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 
 			t.exit <- &shutDown{reason: reason}
 
-			statsInc("LiveTopics", -1)
+			globals.StatsInc("LiveTopics", -1)
 		}
 
 		// sess && msg could be nil if the topic is being killed by timer or due to rehashing.
@@ -591,7 +592,7 @@ func (h *Hub) stopTopicsForUser(uid types.Uid, reason int, alldone chan<- bool) 
 		return true
 	})
 
-	statsInc("LiveTopics", -count)
+	globals.StatsInc("LiveTopics", -count)
 
 	if alldone != nil {
 		for i := 0; i < count; i++ {

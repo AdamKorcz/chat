@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/tinode/chat/server/logs"
+	"github.com/tinode/chat/server/globals"
 )
 
 const (
@@ -58,7 +59,7 @@ func (sess *Session) readLoop() {
 			}
 			return
 		}
-		statsInc("IncomingMessagesWebsockTotal", 1)
+		globals.StatsInc("IncomingMessagesWebsockTotal", 1)
 		sess.dispatchRaw(raw)
 	}
 }
@@ -69,7 +70,7 @@ func (sess *Session) sendMessage(msg any) bool {
 		return false
 	}
 
-	statsInc("OutgoingMessagesWebsockTotal", 1)
+	globals.StatsInc("OutgoingMessagesWebsockTotal", 1)
 	if err := wsWrite(sess.ws, websocket.TextMessage, msg); err != nil {
 		if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure,
 			websocket.CloseNormalClosure) {

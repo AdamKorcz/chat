@@ -13,10 +13,12 @@ import (
 
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/concurrency"
+	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
 	rh "github.com/tinode/chat/server/ringhash"
 	"github.com/tinode/chat/server/store/types"
+	"github.com/tinode/chat/server/globals"
 )
 
 const (
@@ -46,6 +48,47 @@ const (
 	ProxyReqMeUserAgent
 	ProxyReqCall // Used in video call proxy sessions for routing call events.
 )
+
+
+
+type Session interface {
+	AddSub(topic string, sub *Subscription)
+	GetSub(topic string) *Subscription
+	DelSub(topic string)
+	CountSub() int
+	UnsubAll()
+	IsMultiplex() bool
+	IsProxy() bool
+	IsCluster() bool
+	ScheduleClusterWriteLoop()
+	SupportsMessageBatching()
+	QueueOutBatch(msgs []*datamodel.ServerComMessage) bool
+	QueueOut(msg *datamodel.ServerComMessage) bool
+	QueueOutBytes(data []byte) bool
+	MaybeScheduleClusterWriteLoop()
+	DetachSession(fromTopic string)
+	StopSession(data any)
+	CleanUp(expired bool)
+	DispatchRaw(raw []byte)
+	Dispatch(msg *datamodel.ClientComMessage)
+	Subscribe(msg *datamodel.ClientComMessage)
+	Leave(msg *datamodel.ClientComMessage)
+	Publish(msg *datamodel.ClientComMessage)
+	Hello(msg *datamodel.ClientComMessage)
+	Acc(msg *datamodel.ClientComMessage)
+	Login(msg *datamodel.ClientComMessage)
+	AuthSecretReset(params []byte) error
+	OnLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *datamodel.ServerComMessage
+	Get(msg *datamodel.ClientComMessage)
+	Set(msg *datamodel.ClientComMessage)
+	Del(msg *datamodel.ClientComMessage)
+	Note(msg *datamodel.ClientComMessage)
+	ExpandTopicName(msg *datamodel.ClientComMessage)
+	SerializeAndUpdateStats(msg *datamodel.ServerComMessage) any
+	OnBackgroundTimer()
+}
+
+type Subscription interface {}
 
 type clusterNodeConfig struct {
 	Name string `json:"name"`
@@ -180,9 +223,9 @@ type ClusterReq struct {
 	ReqType ProxyReqType
 
 	// Client message. Set for C2S requests.
-	CliMsg *ClientComMessage
+	CliMsg *datamodel.ClientComMessage
 	// Message to be routed. Set for intra-cluster route requests.
-	SrvMsg *ServerComMessage
+	SrvMsg *datamodel.ServerComMessage
 
 	// Expanded (routable) topic name
 	RcptTo string
@@ -207,7 +250,7 @@ type ClusterRoute struct {
 	Fingerprint int64
 
 	// Message to be routed. Set for intra-cluster route requests.
-	SrvMsg *ServerComMessage
+	SrvMsg *datamodel.ServerComMessage
 
 	// Originating session
 	Sess *ClusterSess
@@ -216,7 +259,7 @@ type ClusterRoute struct {
 // ClusterResp is a Master to Proxy response message.
 type ClusterResp struct {
 	// Server message with the response.
-	SrvMsg *ServerComMessage
+	SrvMsg *datamodel.ServerComMessage
 	// Originating session ID to forward response to, if any.
 	OrigSid string
 	// Expanded (routable) topic name
@@ -688,7 +731,7 @@ func (c *Cluster) Ping(ping *ClusterPing, unused *bool) error {
 
 // Sends user cache update to user's Master node where the cache actually resides.
 // The request is extected to contain users who reside at remote nodes only.
-func (c *Cluster) routeUserReq(req *UserCacheReq) error {
+func (c *Cluster) RouteUserReq(req *UserCacheReq) error {
 	// Index requests by cluster node.
 	reqByNode := make(map[string]*UserCacheReq)
 
@@ -764,7 +807,7 @@ func (c *Cluster) routeUserReq(req *UserCacheReq) error {
 }
 
 // Given topic name, find appropriate cluster node to route message to.
-func (c *Cluster) nodeForTopic(topic string) *ClusterNode {
+func (c *Cluster) NodeForTopic(topic string) *ClusterNode {
 	key := c.ring.Get(topic)
 	if key == c.thisNodeName {
 		logs.Err.Println("cluster: request to route to self")
@@ -780,7 +823,7 @@ func (c *Cluster) nodeForTopic(topic string) *ClusterNode {
 }
 
 // isRemoteTopic checks if the given topic is handled by this node or a remote node.
-func (c *Cluster) isRemoteTopic(topic string) bool {
+func (c *Cluster) IsRemoteTopic(topic string) bool {
 	if c == nil {
 		// Cluster not initialized, all topics are local
 		return false
@@ -789,7 +832,7 @@ func (c *Cluster) isRemoteTopic(topic string) bool {
 }
 
 // genLocalTopicName is just like genTopicName(), but the generated name belongs to the current cluster node.
-func (c *Cluster) genLocalTopicName() string {
+func (c *Cluster) GenLocalTopicName() string {
 	topic := genTopicName()
 	if c == nil {
 		// Cluster not initialized, all topics are local
@@ -805,7 +848,7 @@ func (c *Cluster) genLocalTopicName() string {
 
 // isPartitioned checks if the cluster is partitioned due to network or other failure and if the
 // current node is a part of the smaller partition.
-func (c *Cluster) isPartitioned() bool {
+func (c *Cluster) IsPartitioned() bool {
 	if c == nil || c.fo == nil {
 		// Cluster not initialized or failover disabled therefore not partitioned.
 		return false
@@ -818,7 +861,7 @@ func (c *Cluster) isPartitioned() bool {
 	return result
 }
 
-func (c *Cluster) makeClusterReq(reqType ProxyReqType, msg *ClientComMessage, topic string, sess *Session) *ClusterReq {
+func (c *Cluster) MakeClusterReq(reqType ProxyReqType, msg *datamodel.ClientComMessage, topic string, sess *Session) *ClusterReq {
 	req := &ClusterReq{
 		Node:        c.thisNodeName,
 		Signature:   c.ring.Signature(),
@@ -857,7 +900,7 @@ func (c *Cluster) makeClusterReq(reqType ProxyReqType, msg *ClientComMessage, to
 }
 
 // Forward client request message from the Topic Proxy to the Topic Master (cluster node which owns the topic).
-func (c *Cluster) routeToTopicMaster(reqType ProxyReqType, msg *ClientComMessage, topic string, sess *Session) error {
+func (c *Cluster) RouteToTopicMaster(reqType ProxyReqType, msg *datamodel.ClientComMessage, topic string, sess *Session) error {
 	if c == nil {
 		// Cluster may be nil due to shutdown.
 		return nil
@@ -882,7 +925,7 @@ func (c *Cluster) routeToTopicMaster(reqType ProxyReqType, msg *ClientComMessage
 }
 
 // Forward server response message to the node that owns topic.
-func (c *Cluster) routeToTopicIntraCluster(topic string, msg *ServerComMessage, sess *Session) error {
+func (c *Cluster) RouteToTopicIntraCluster(topic string, msg *datamodel.ServerComMessage, sess *Session) error {
 	if c == nil {
 		// Cluster may be nil due to shutdown.
 		return nil
@@ -907,7 +950,7 @@ func (c *Cluster) routeToTopicIntraCluster(topic string, msg *ServerComMessage, 
 }
 
 // Topic proxy terminated. Inform remote Master node that the proxy is gone.
-func (c *Cluster) topicProxyGone(topicName string) error {
+func (c *Cluster) TopicProxyGone(topicName string) error {
 	if c == nil {
 		// Cluster may be nil due to shutdown.
 		return nil
@@ -1188,7 +1231,7 @@ func (sess *Session) clusterWriteLoop(forTopic string) {
 				// channel closed
 				return
 			}
-			srvMsg := msg.(*ServerComMessage)
+			srvMsg := msg.(*datamodel.ServerComMessage)
 			response := &ClusterResp{SrvMsg: srvMsg}
 			if srvMsg.sess == nil {
 				response.OrigSid = "*"

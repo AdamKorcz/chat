@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/tinode/chat/server/cluster"
 	"github.com/tinode/chat/server/datamodel"
 	"github.com/tinode/chat/pbx"
 	"github.com/tinode/chat/server/auth"
@@ -85,7 +86,7 @@ type Session struct {
 	grpcnode pbx.Node_MessageLoopServer
 
 	// Reference to the cluster node where the session has originated. Set only for cluster RPC sessions.
-	clnode *ClusterNode
+	clnode *cluster.ClusterNode
 
 	// Reference to multiplexing session. Set only for proxy sessions.
 	multi        *Session
